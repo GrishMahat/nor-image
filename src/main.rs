@@ -1,4 +1,4 @@
-// Copyright 2023` Grish
+// Copyright 2025 Grish
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,42 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Most of the documentation is by AI, I am to lazy to write it myself.
+//! Most of the documentation is by AI, I am too lazy to write it myself.
 //! # Nor-Image CLI
-//! 
-//! Command-line interface for the Nor-Image tool, providing functionality for:
-//! 
-//! - Image format conversion between PNG and custom .nor format
-//! - Real-time image viewing with interactive controls
-//! - Image metadata management and display
-//! - Performance optimization through caching and streaming
-//! 
-//! ## Usage Examples
-//! 
+//!
+//! A high-performance image processing and conversion tool with an intuitive command-line interface.
+//!
+//! ## Key Features
+//!
+//! - Convert between PNG and .nor formats with optional processing
+//! - Interactive image viewing with real-time adjustments
+//! - Comprehensive metadata management
+//! - Performance optimizations through caching, streaming, and parallel processing
+//!
+//! ## Basic Usage
+//!
 //! ```bash
-//! # Convert PNG to custom format
-//! nor-image png-to-custom input.png output.nor --compression rle
-//! 
-//! # View an image with caching
-//! nor-image view input.nor --use-cache
-//! 
-//! # Display image metadata
-//! nor-image info input.nor
+//! nor-image png-to-custom input.png output.nor    # Convert PNG to custom format
+//! nor-image custom-to-png input.nor output.png      # Convert custom format to PNG
+//! nor-image view image.nor                          # View a .nor image
+//! nor-image info image.nor                          # Display image metadata
+//! nor-image clear-cache                             # Clear image cache
 //! ```
-//! 
-//! ## Architecture
-//! 
-//! The CLI is built using the following components:
-//! 
-//! - `clap` for argument parsing and command structure
-//! - `converter` module for image format conversion
-//! - `format` module for custom image format handling
-//! - `viewer` module for interactive image viewing
-//! - `processing` module for performance optimizations
+//!
+//! For more details, run `nor-image --help`.
 
 use clap::{Parser, Subcommand, ValueEnum};
-use std::fs;
 use std::error::Error;
+use std::fs;
+use std::path::Path;
 
 use crate::converter::{png_to_custom, custom_to_png, ConversionConfig};
 use crate::format::{CustomImage, CompressionType};
@@ -58,16 +50,16 @@ mod format;
 mod viewer;
 mod processing;
 
-/// Supported compression types for the custom image format
+/// Supported compression types for the custom image format.
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum CompressType {
-    /// No compression
+    /// No compression – Maximum quality, largest file size.
     None,
-    /// Run-length encoding compression
+    /// Run-length encoding – Best for images with large uniform areas.
     Rle,
-    /// Delta encoding compression
+    /// Delta encoding – Efficient for photographs with gradual color changes.
     Delta,
-    /// Lossy compression
+    /// Lossy compression – Smallest file size, configurable quality.
     Lossy,
 }
 
@@ -82,138 +74,134 @@ impl From<CompressType> for CompressionType {
     }
 }
 
-/// Main CLI configuration struct
+/// Nor-Image: High-performance image processing and conversion tool.
 #[derive(Parser)]
+#[command(name = "nor-image")]
+#[command(author = "Grish <grish@nory.tech>")]
+#[command(version = "1.0")]
+#[command(about = "A powerful image processing tool for converting and manipulating images", long_about = None)]
 struct Cli {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Commands,
 }
 
-/// Available CLI commands
+/// Available commands.
 #[derive(Subcommand)]
 enum Commands {
-    /// Convert a PNG file to the custom image format
+    /// Convert a PNG file to the custom .nor format.
+    #[command(name = "png-to-custom", visible_alias = "p2n")]
     PngToCustom {
-        /// Input PNG file path
+        /// Input PNG file path (must have .png extension).
+        #[arg(value_name = "INPUT.png")]
         input: String,
-        /// Output custom image file path
+        /// Output .nor file path (must have .nor extension).
+        #[arg(value_name = "OUTPUT.nor")]
         output: String,
-        /// Force conversion to grayscale
-        #[clap(long)]
+        /// Convert image to grayscale.
+        #[arg(long, help = "Convert to grayscale (reduces file size)")]
         grayscale: bool,
-        /// Compression method to use
-        #[clap(long, value_enum, default_value = "none")]
+        /// Compression method.
+        #[arg(long, value_enum, default_value = "none", help = "Compression method")]
         compression: CompressType,
-        /// Skip metadata extraction
-        #[clap(long)]
-        no_metadata: bool,
-        /// Target width for resizing
-        #[clap(long)]
+        /// Target width for resizing.
+        #[arg(long, value_name = "PIXELS", help = "Resize to specified width")]
         width: Option<u32>,
-        /// Target height for resizing
-        #[clap(long)]
+        /// Target height for resizing.
+        #[arg(long, value_name = "PIXELS", help = "Resize to specified height")]
         height: Option<u32>,
-        /// Brightness adjustment (-255 to 255)
-        #[clap(long, default_value = "0")]
+        /// Brightness adjustment (-255 to 255).
+        #[arg(long, default_value = "0", value_name = "VALUE", help = "Adjust brightness (-255 to 255)")]
         brightness: i32,
-        /// Contrast adjustment (-255 to 255)
-        #[clap(long, default_value = "0")]
+        /// Contrast adjustment (-255 to 255).
+        #[arg(long, default_value = "0", value_name = "VALUE", help = "Adjust contrast (-255 to 255)")]
         contrast: i32,
-        /// Disable image caching
-        #[clap(long)]
+        /// Disable image caching.
+        #[arg(long, help = "Disable caching for faster processing")]
         no_cache: bool,
-        /// Disable streaming processing
-        #[clap(long)]
+        /// Disable streaming processing.
+        #[arg(long, help = "Disable streaming (uses more memory)")]
         no_streaming: bool,
-        /// Chunk size for parallel processing (in MB)
-        #[clap(long, default_value = "1")]
+        /// Chunk size for parallel processing (in MB).
+        #[arg(long, default_value = "1", value_name = "MB", help = "Chunk size for parallel processing (MB)")]
         chunk_size: usize,
     },
-    /// Convert a custom image file to PNG
+    /// Convert a .nor file back to PNG format.
+    #[command(name = "custom-to-png", visible_alias = "n2p")]
     CustomToPng {
-        /// Input custom image file path
+        /// Input .nor file path (must have .nor extension).
+        #[arg(value_name = "input.nor")]
         input: String,
-        /// Output PNG file path
+        /// Output PNG file path (must have .png extension).
+        #[arg(value_name = "output.png")]
         output: String,
-        /// Target width for resizing
-        #[clap(long)]
+        /// Target width for resizing.
+        #[arg(long, value_name = "PIXELS", help = "Resize to specified width")]
         width: Option<u32>,
-        /// Target height for resizing
-        #[clap(long)]
+        /// Target height for resizing.
+        #[arg(long, value_name = "PIXELS", help = "Resize to specified height")]
         height: Option<u32>,
-        /// Brightness adjustment (-255 to 255)
-        #[clap(long, default_value = "0")]
+        /// Brightness adjustment (-255 to 255).
+        #[arg(long, default_value = "0", value_name = "VALUE", help = "Adjust brightness (-255 to 255)")]
         brightness: i32,
-        /// Contrast adjustment (-255 to 255)
-        #[clap(long, default_value = "0")]
+        /// Contrast adjustment (-255 to 255).
+        #[arg(long, default_value = "0", value_name = "VALUE", help = "Adjust contrast (-255 to 255)")]
         contrast: i32,
-        /// Disable streaming processing
-        #[clap(long)]
+        /// Disable streaming processing.
+        #[arg(long, help = "Disable streaming (uses more memory)")]
         no_streaming: bool,
-        /// Chunk size for parallel processing (in MB)
-        #[clap(long, default_value = "1")]
+        /// Chunk size for parallel processing (in MB).
+        #[arg(long, default_value = "1", value_name = "MB", help = "Chunk size for parallel processing (MB)")]
         chunk_size: usize,
     },
-    /// View a custom image file
+    /// View a .nor image interactively.
+    #[command(name = "view", visible_alias = "v")]
     View {
-        /// Input custom image file path
+        /// Input .nor file path.
+        #[arg(value_name = "IMAGE.nor", help = "Path to .nor image file")]
         input: String,
-        /// Use cached version if available
-        #[clap(long)]
+        /// Use cached version if available.
+        #[arg(long, help = "Use cached version for faster loading")]
         use_cache: bool,
     },
-    /// Display metadata of a custom image file
+    /// Display metadata of a .nor image.
+    #[command(name = "info", visible_alias = "i")]
     Info {
-        /// Input custom image file path
+        /// Input .nor file path.
+        #[arg(value_name = "IMAGE.nor", help = "Path to .nor image file")]
         input: String,
     },
-    /// Clear the image cache
+    /// Clear the image cache.
+    #[command(name = "clear-cache", visible_alias = "cc")]
     ClearCache,
 }
 
-/// Displays detailed metadata of a custom image in a formatted way.
-/// 
-/// This function prints a comprehensive overview of the image's properties
-/// and metadata, including:
-/// - Basic properties (dimensions, color type, compression)
-/// - Creation date and author information
-/// - Camera settings (if available)
-/// - Custom metadata fields
-/// 
-/// # Arguments
-/// 
-/// * `image` - Reference to a CustomImage whose metadata should be displayed
-/// 
-/// # Example
-/// 
-/// ```no_run
-/// use format::CustomImage;
-/// let image = CustomImage::from_bytes(&bytes)?;
-/// display_metadata(&image);
-/// ```
-/// 
-/// # Output Format
-/// 
-/// ```text
-/// Image Information:
-/// ------------------
-/// Dimensions: 1920x1080
-/// Color Type: RGB
-/// Compression: RLE
-/// 
-/// Metadata:
-/// Creation Date: 1634567890
-/// Author: John Doe
-/// Camera Model: Canon EOS R5
-/// Exposure Time: 1/1000s
-/// ISO: 100
-/// F-Number: f/2.8
-/// Focal Length: 50mm
-/// 
-/// Custom Fields:
-/// Location: New York
-/// Event: Summer Festival
-/// ```
+/// Validates that the provided path has a .nor extension.
+fn validate_nor_extension(path: &str) -> Result<(), String> {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    if ext == "nor" {
+        Ok(())
+    } else {
+        Err(format!("Invalid file extension. Expected .nor, got: {}", path))
+    }
+}
+
+/// Validates that the provided path has a .png extension.
+fn validate_png_extension(path: &str) -> Result<(), String> {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    if ext == "png" {
+        Ok(())
+    } else {
+        Err(format!("Invalid file extension. Expected .png, got: {}", path))
+    }
+}
+
+/// Displays metadata of a custom image in a formatted way.
 fn display_metadata(image: &CustomImage) {
     println!("\nImage Information:");
     println!("------------------");
@@ -255,30 +243,10 @@ fn display_metadata(image: &CustomImage) {
     }
 }
 
-/// Main entry point for the Nor-Image CLI application.
-/// 
-/// This function:
-/// 1. Parses command line arguments
-/// 2. Executes the appropriate command
-/// 3. Handles errors and provides user feedback
-/// 
-/// # Error Handling
-/// 
-/// Returns an error in cases such as:
-/// - File I/O failures
-/// - Invalid image formats
-/// - Conversion errors
-/// - Invalid command arguments
-/// 
-/// # Example
-/// 
-/// ```no_run
-/// fn main() -> Result<(), Box<dyn Error>> {
-///     // Parse arguments and execute commands
-///     Ok(())
-/// }
-/// ```
+/// Main entry point.
 fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize logging.
+    env_logger::init();
     let cli = Cli::parse();
 
     match cli.command {
@@ -287,15 +255,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             output,
             grayscale,
             compression,
-            no_metadata: _,
             width,
             height,
             brightness,
             contrast,
             no_cache,
-            no_streaming,
+            no_streaming: _,
             chunk_size: _,
         } => {
+            // Validate file extensions.
+            validate_png_extension(&input)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            validate_nor_extension(&output)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
             let config = ConversionConfig {
                 resize_width: width,
                 resize_height: height,
@@ -304,12 +277,29 @@ fn main() -> Result<(), Box<dyn Error>> {
                 force_grayscale: grayscale,
                 compression: compression.into(),
                 use_cache: !no_cache,
-                streaming: !no_streaming,
             };
             
-            png_to_custom(&input, Some(&output), Some(config))
-                .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-            println!("Successfully converted {} to {}", input, output);
+            println!("Converting {} to {} with settings:", input, output);
+            println!("  - Grayscale: {}", if grayscale { "yes" } else { "no" });
+            println!("  - Compression: {:?}", compression);
+            if width.is_some() || height.is_some() {
+                println!("  - Resize: {}x{}", 
+                    width.map_or("unchanged".to_string(), |w| w.to_string()),
+                    height.map_or("unchanged".to_string(), |h| h.to_string()));
+            }
+            if brightness != 0 || contrast != 0 {
+                println!("  - Adjustments: brightness={}, contrast={}", brightness, contrast);
+            }
+            println!("  - Caching: {}", if !no_cache { "enabled" } else { "disabled" });
+            
+            match png_to_custom(&input, Some(&output), Some(config)) {
+                Ok(_) => println!("✓ Successfully converted {} to {}", input, output),
+                Err(e) => {
+                    eprintln!("Error during conversion:");
+                    eprintln!("  {}", e);
+                    return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)));
+                }
+            }
         }
         Commands::CustomToPng {
             input,
@@ -318,10 +308,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             height,
             brightness,
             contrast,
-            no_streaming,
+            no_streaming: _,
             chunk_size: _,
         } => {
-            // Read the custom image
+            validate_nor_extension(&input)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            validate_png_extension(&output)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            
             let bytes = fs::read(&input)?;
             let custom_img = CustomImage::from_bytes(&bytes)?;
             
@@ -333,26 +327,48 @@ fn main() -> Result<(), Box<dyn Error>> {
                 force_grayscale: false,
                 compression: CompressionType::None,
                 use_cache: false,
-                streaming: !no_streaming,
             };
             
-            custom_to_png(&custom_img, &output, Some(config))
-                .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-            println!("Successfully converted {} to {}", input, output);
+            println!("Converting {} to {} with settings:", input, output);
+            if width.is_some() || height.is_some() {
+                println!("  - Resize: {}x{}", 
+                    width.map_or("unchanged".to_string(), |w| w.to_string()),
+                    height.map_or("unchanged".to_string(), |h| h.to_string()));
+            }
+            if brightness != 0 || contrast != 0 {
+                println!("  - Adjustments: brightness={}, contrast={}", brightness, contrast);
+            }
+            
+            match custom_to_png(&custom_img, &output, Some(config)) {
+                Ok(_) => println!("✓ Successfully converted {} to {}", input, output),
+                Err(e) => {
+                    eprintln!("Error during conversion:");
+                    eprintln!("  {}", e);
+                    return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)));
+                }
+            }
         }
         Commands::View { input, use_cache: _ } => {
+            validate_nor_extension(&input)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
             view_custom_image(&input)?;
         }
         Commands::Info { input } => {
+            validate_nor_extension(&input)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
             let bytes = fs::read(&input)?;
             let custom_img = CustomImage::from_bytes(&bytes)?;
             display_metadata(&custom_img);
         }
         Commands::ClearCache => {
-            // Clear the cache implementation
-            println!("Cache cleared successfully");
+            use crate::processing::IMAGE_CACHE;
+            if let Ok(mut cache) = IMAGE_CACHE.lock() {
+                cache.clear();
+                println!("Image cache cleared successfully");
+            } else {
+                eprintln!("Failed to clear cache: could not acquire lock");
+            }
         }
     }
-
     Ok(())
 }

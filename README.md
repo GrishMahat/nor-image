@@ -1,6 +1,6 @@
-This project was made just for fun. It has made me laugh, cry. I know the code is weird—please don’t use it for anything serious!
+This project was made just for fun. It has made me laugh, cry. I know the code is weird—please don't use it for anything serious!
 
-I’m learning Rust, and I wanted to understand how images work, so I built this. 
+I'm learning Rust, and I wanted to understand how images work, so I built this. 
 
 # Nor-Image
 
@@ -11,6 +11,18 @@ A high-performance image processing and conversion tool written in Rust. This to
   - Lossless conversion between PNG and .nor format
   - Support for both RGB and grayscale color spaces
   - Metadata preservation
+  - Secure file format validation
+  - Automatic extension checking
+
+### File Extensions
+The tool works with two main file formats:
+- `.png` - Standard PNG image files
+- `.nor` - Custom Nor-Image format
+  - Optimized for efficient storage
+  - Built-in compression support
+  - Metadata preservation
+  - Checksum verification
+  - Streaming support
 
 ### 🗜️ Compression Options
 - **Multiple Compression Methods**
@@ -73,26 +85,34 @@ cargo run --
 
 1. **Convert PNG to NOR format:**
    ```bash
+   # Input must be .png, output must be .nor
    nor-image png-to-custom input.png output.nor
    ```
 
-2. **Convert with compression:**
+2. **Convert NOR to PNG format:**
    ```bash
-   nor-image png-to-custom input.png output.nor --compression rle
+   # Input must be .nor, output must be .png
+   nor-image custom-to-png input.nor output.png
    ```
 
-3. **Convert with image processing:**
+3. **View a NOR image:**
    ```bash
-   nor-image png-to-custom input.png output.nor \
-     --brightness 20 \
-     --contrast 10 \
-     --grayscale
-   ```
-
-4. **View an image:**
-   ```bash
+   # Only .nor files are supported for viewing
    nor-image view image.nor
    ```
+
+4. **Display NOR image info:**
+   ```bash
+   # Only .nor files are supported for info display
+   nor-image info image.nor
+   ```
+
+### Error Handling
+The tool includes robust error handling for file extensions:
+- Validates all input and output file extensions
+- Provides clear error messages for incorrect extensions
+- Prevents accidental file format mismatches
+- Ensures data integrity through format validation
 
 ### Advanced Usage
 

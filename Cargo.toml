@@ -2,20 +2,56 @@
 name = "nor-image"
 version = "0.1.0"
 edition = "2021"
+authors = ["Grish <grish@nory.tech>"]
+description = "A high-performance image processing and conversion tool"
+repository = "https://github.com/grishmahat/nor-image"
+license = "Apache-2.0"
+keywords = ["image", "processing", "conversion", "viewer"]
+categories = ["multimedia::images", "command-line-utilities"]
 
 [dependencies]
-image = "0.25.5"
-winit = "0.30.9"
-glium = "0.36"
-clap = { version = "4.5.30", features = ["derive"] }
-minifb = "0.25"
+# Core image processing
+image = { version = "0.25.5", default-features = false, features = ["png"] }
+kamadak-exif = "0.5"
+
+# CLI and UI
+clap = { version = "4.4", features = ["derive"] }
+minifb = { version = "0.25", default-features = false, features = ["x11"] }
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Cryptography and hashing
 sha2 = "0.10"
-kamadak-exif = "0.5"
-rayon = "1.8"
+
+# Performance optimizations
+rayon = { version = "1.8", optional = true }
 memmap2 = "0.9"
-lru = "0.12"
+lru = { version = "0.12", optional = true }
 bytes = "1.5"
 crossbeam-channel = "0.5"
+
+# Utilities
 lazy_static = "1.4"
+
+# Logging
+env_logger = "0.10"
+log = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[features]
+default = ["parallel", "cache"]
+parallel = ["rayon"]
+cache = ["lru"]
+minimal = []

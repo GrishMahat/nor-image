@@ -19,20 +19,39 @@
 //! 
 //! - Multiple color types (Grayscale and RGB)
 //! - Various compression methods (None, RLE, Delta, Lossy)
-//! - Embedded metadata
-//! - Checksum verification
+//! - Embedded metadata (stored as JSON)
+//! - SHA256 checksum verification for data integrity
 //!
-//! The file format consists of:
+//! # File Format Structure
+//!
+//! The binary format consists of:
 //! - Magic number (4 bytes)
 //! - Version (1 byte) 
 //! - Color type (1 byte)
 //! - Width (4 bytes, little-endian)
 //! - Height (4 bytes, little-endian)
 //! - Compression type (1 byte)
-//! - Metadata length (4 bytes)
-//! - Metadata (JSON)
-//! - Pixel data
+//! - Metadata length (4 bytes, little-endian)
+//! - Metadata (JSON string)
+//! - Pixel data (uncompressed or compressed bytes)
 //! - SHA256 checksum (32 bytes)
+//!
+//! # Example
+//!
+//! ```rust
+//! use your_crate::format::{CustomImage, ColorType, CompressionType};
+//!
+//! // Create a dummy 10x10 RGB image with dummy data.
+//! let width = 10;
+//! let height = 10;
+//! let channels = ColorType::Rgb.channels() as usize;
+//! let data = vec![128u8; width * height * channels];
+//! let image = CustomImage::new(width, height, ColorType::Rgb, data, None, CompressionType::None)?;
+//! let bytes = image.to_bytes()?;
+//! let decoded_image = CustomImage::from_bytes(&bytes)?;
+//! assert_eq!(decoded_image.width, width);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use std::convert::TryInto;
 use std::convert::TryFrom;
@@ -41,6 +60,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 
 /// Metadata associated with an image.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -60,7 +80,7 @@ pub struct ImageMetadata {
     /// Focal length in mm
     pub focal_length: Option<f32>,
     /// Additional custom metadata as key-value pairs
-    pub custom_fields: std::collections::HashMap<String, String>,
+    pub custom_fields: HashMap<String, String>,
 }
 
 impl Default for ImageMetadata {
@@ -76,7 +96,7 @@ impl Default for ImageMetadata {
             iso: None,
             f_number: None,
             focal_length: None,
-            custom_fields: std::collections::HashMap::new(),
+            custom_fields: HashMap::new(),
         }
     }
 }
@@ -96,11 +116,11 @@ pub enum FormatError {
     InvalidDimensions { width: u32, height: u32 },
     /// The color type byte in the file is unsupported.
     UnsupportedColorType(u8),
-    /// Checksum verification failed
+    /// Checksum verification failed.
     ChecksumMismatch,
-    /// Error during compression/decompression
+    /// Error during compression/decompression.
     CompressionError(String),
-    /// Error serializing/deserializing metadata
+    /// Error serializing/deserializing metadata.
     MetadataError(String),
 }
 
@@ -133,9 +153,9 @@ impl StdError for FormatError {
 /// Supported color types for image data.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorType {
-    /// Single channel grayscale
+    /// Single channel grayscale.
     Gray = 0,
-    /// Three channel RGB
+    /// Three channel RGB.
     Rgb = 1,
 }
 
@@ -164,13 +184,13 @@ impl TryFrom<u8> for ColorType {
 /// Supported compression methods for image data.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CompressionType {
-    /// No compression
+    /// No compression.
     None = 0,
-    /// Run-length encoding
+    /// Run-length encoding.
     RLE = 1,
-    /// Delta encoding
+    /// Delta encoding.
     Delta = 2,
-    /// Lossy compression
+    /// Lossy compression.
     Lossy = 3,
 }
 
@@ -199,9 +219,9 @@ pub struct CustomImage {
     pub color_type: ColorType,
     /// Raw pixel data as bytes.
     pub data: Vec<u8>,
-    /// Image metadata
+    /// Image metadata.
     pub metadata: ImageMetadata,
-    /// Type of compression used
+    /// Type of compression used.
     pub compression: CompressionType,
 }
 
@@ -241,18 +261,18 @@ impl CustomImage {
     ///
     /// # Arguments
     ///
-    /// * `width` - Width of the image in pixels
-    /// * `height` - Height of the image in pixels  
-    /// * `color_type` - Color type (Gray or RGB)
-    /// * `data` - Raw pixel data
-    /// * `metadata` - Optional image metadata
-    /// * `compression` - Compression method used
+    /// * `width` - Width of the image in pixels.
+    /// * `height` - Height of the image in pixels.
+    /// * `color_type` - Color type (Gray or RGB).
+    /// * `data` - Raw pixel data.
+    /// * `metadata` - Optional image metadata.
+    /// * `compression` - Compression method used.
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Dimensions are invalid (zero or too large)
-    /// - Data length doesn't match expected size for uncompressed images
+    /// - Dimensions are invalid (zero or too large).
+    /// - Data length doesn't match the expected size for uncompressed images.
     pub fn new(
         width: u32,
         height: u32,
@@ -309,7 +329,7 @@ impl CustomImage {
         compressed
     }
 
-    /// Decompresses RLE encoded data
+    /// Decompresses RLE encoded data.
     pub fn decompress_rle(data: &[u8]) -> Result<Vec<u8>, FormatError> {
         let mut decompressed = Vec::new();
         let mut i = 0;
@@ -328,7 +348,7 @@ impl CustomImage {
         Ok(decompressed)
     }
 
-    /// Compresses data using delta encoding
+    /// Compresses data using delta encoding.
     pub fn compress_delta(data: &[u8]) -> Vec<u8> {
         let mut compressed = Vec::with_capacity(data.len());
         if data.is_empty() {
@@ -343,7 +363,7 @@ impl CustomImage {
         compressed
     }
 
-    /// Decompresses delta encoded data
+    /// Decompresses delta encoded data.
     pub fn decompress_delta(data: &[u8]) -> Vec<u8> {
         let mut decompressed = Vec::with_capacity(data.len());
         if data.is_empty() {
@@ -358,6 +378,10 @@ impl CustomImage {
         decompressed
     }
 
+    /// Compresses data using lossy compression.
+    ///
+    /// The lossy method uses block-based quantization. The quality parameter (1-100)
+    /// controls the block size.
     pub fn compress_lossy(&self, quality: u8) -> Result<Vec<u8>, FormatError> {
         let quality = quality.clamp(1, 100) as f32 / 100.0;
         let block_size = if quality < 0.5 { 4 } else { 2 };
@@ -365,22 +389,22 @@ impl CustomImage {
         let mut compressed = Vec::new();
         match self.color_type {
             ColorType::Gray => {
-                // For grayscale, apply block-based quantization
+                // For grayscale, apply block-based quantization.
                 for chunk in self.data.chunks(block_size * block_size) {
                     if chunk.len() == block_size * block_size {
-                        // Calculate average value for the block
+                        // Calculate average value for the block.
                         let avg = (chunk.iter().map(|&x| x as u32).sum::<u32>() / 
                                  (block_size * block_size) as u32) as u8;
-                        // Store one value for the entire block
+                        // Store one value for the entire block.
                         compressed.push(avg);
                     } else {
-                        // Handle incomplete blocks at the end
+                        // Handle incomplete blocks.
                         compressed.extend_from_slice(chunk);
                     }
                 }
             }
             ColorType::Rgb => {
-                // For RGB, apply chroma subsampling and block quantization
+                // For RGB, apply chroma subsampling and block quantization.
                 for y in (0..self.height as usize).step_by(block_size) {
                     for x in (0..self.width as usize).step_by(block_size) {
                         let mut r_sum = 0u32;
@@ -388,7 +412,7 @@ impl CustomImage {
                         let mut b_sum = 0u32;
                         let mut count = 0;
 
-                        // Calculate average RGB values for the block
+                        // Average RGB values for the block.
                         for dy in 0..block_size {
                             for dx in 0..block_size {
                                 if y + dy < self.height as usize && x + dx < self.width as usize {
@@ -401,7 +425,6 @@ impl CustomImage {
                             }
                         }
 
-                        // Store averaged values
                         if count > 0 {
                             compressed.push((r_sum / count) as u8);
                             compressed.push((g_sum / count) as u8);
@@ -415,6 +438,7 @@ impl CustomImage {
         Ok(compressed)
     }
 
+    /// Decompresses data that was compressed using lossy compression.
     pub fn decompress_lossy(
         compressed: &[u8],
         width: u32,
@@ -447,8 +471,7 @@ impl CustomImage {
                     for x in 0..width as usize {
                         let block_x = (x / block_size) * block_size;
                         let block_y = (y / block_size) * block_size;
-                        let block_idx = ((block_y * width as usize + block_x) / 
-                                       (block_size * block_size)) * 3;
+                        let block_idx = ((block_y * width as usize + block_x) / (block_size * block_size)) * 3;
                         
                         if block_idx + 2 < compressed.len() {
                             decompressed.push(compressed[block_idx]);     // R
@@ -465,7 +488,7 @@ impl CustomImage {
         Ok(decompressed)
     }
 
-    /// Compresses data using RLE encoding
+    /// Compresses the image data based on the provided compression type.
     #[allow(dead_code)]
     pub fn compress(&self, compression_type: CompressionType) -> Result<Vec<u8>, FormatError> {
         match compression_type {
@@ -476,7 +499,7 @@ impl CustomImage {
         }
     }
 
-    /// Decompresses data based on the current compression type
+    /// Decompresses data based on the provided compression type.
     #[allow(dead_code)]
     pub fn decompress(
         compressed: &[u8],
@@ -495,13 +518,17 @@ impl CustomImage {
 
     /// Serializes the `CustomImage` into a byte vector.
     ///
-    /// The serialized format is:
+    /// The format is:
     /// - MAGIC_NUMBER (4 bytes)
     /// - VERSION (1 byte)
     /// - COLOR_TYPE (1 byte)
-    /// - width (4 bytes, little-endian)
-    /// - height (4 bytes, little-endian)
-    /// - pixel data (width * height * channels bytes)
+    /// - Width (4 bytes, little-endian)
+    /// - Height (4 bytes, little-endian)
+    /// - Compression type (1 byte)
+    /// - Metadata length (4 bytes, little-endian)
+    /// - Metadata (JSON)
+    /// - Image data
+    /// - SHA256 checksum (32 bytes)
     pub fn to_bytes(&self) -> Result<Vec<u8>, FormatError> {
         let metadata_json = serde_json::to_string(&self.metadata)
             .unwrap_or_else(|_| "{}".to_string());
@@ -512,10 +539,10 @@ impl CustomImage {
         }
 
         let header_len = MAGIC_NUMBER.len() + 1 + 1 + 4 + 4 + 1 + 4 + metadata_bytes.len();
-        let total_size = header_len + self.data.len() + 32; // +32 for SHA256 hash
+        let total_size = header_len + self.data.len() + 32; // 32 bytes for SHA256 hash
         let mut bytes = Vec::with_capacity(total_size);
         
-        // Write header
+        // Write header.
         bytes.extend_from_slice(MAGIC_NUMBER);
         bytes.push(VERSION);
         bytes.push(self.color_type as u8);
@@ -523,23 +550,23 @@ impl CustomImage {
         bytes.extend_from_slice(&self.height.to_le_bytes());
         bytes.push(self.compression as u8);
         
-        // Write metadata
+        // Write metadata.
         bytes.extend_from_slice(&(metadata_bytes.len() as u32).to_le_bytes());
         bytes.extend_from_slice(metadata_bytes);
         
-        // Write image data
+        // Write image data.
         bytes.extend_from_slice(&self.data);
         
-        // Calculate and append checksum
+        // Calculate and append checksum.
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
-        let checksum = hasher.finalize(); // Compute the hash
+        let checksum = hasher.finalize();
         bytes.extend_from_slice(&checksum);
         
         Ok(bytes)
     }
 
-    /// Deserializes a `CustomImage` from a slice of bytes.
+    /// Deserializes a `CustomImage` from a byte slice.
     ///
     /// # Errors
     ///
@@ -548,13 +575,14 @@ impl CustomImage {
     /// - The magic number is invalid.
     /// - The version is unsupported.
     /// - The color type is unsupported.
-    /// - The pixel data length does not match width * height * channels.
+    /// - The pixel data length does not match the expected size.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, FormatError> {
-        if bytes.len() < MAGIC_NUMBER.len() + 1 + 1 + 4 + 4 + 1 + 4 + 32 {
+        let min_len = MAGIC_NUMBER.len() + 1 + 1 + 4 + 4 + 1 + 4 + 32;
+        if bytes.len() < min_len {
             return Err(FormatError::DataTooShort);
         }
         
-        // Verify checksum
+        // Verify checksum.
         let data_bytes = &bytes[..bytes.len() - 32];
         let file_hash = &bytes[bytes.len() - 32..];
         let mut hasher = Sha256::new();
@@ -563,7 +591,7 @@ impl CustomImage {
             return Err(FormatError::ChecksumMismatch);
         }
         
-        // Read header
+        // Read header.
         if &bytes[0..MAGIC_NUMBER.len()] != MAGIC_NUMBER {
             return Err(FormatError::InvalidHeader);
         }
@@ -586,16 +614,22 @@ impl CustomImage {
         let compression = CompressionType::try_from(bytes[pos])?;
         pos += 1;
         
-        // Read metadata
+        // Read metadata.
+        if pos + 4 > bytes.len() - 32 {
+            return Err(FormatError::DataTooShort);
+        }
         let metadata_len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
         pos += 4;
+        if pos + metadata_len > bytes.len() - 32 {
+            return Err(FormatError::DataTooShort);
+        }
         let metadata_json = std::str::from_utf8(&bytes[pos..pos + metadata_len])
             .map_err(|e| FormatError::MetadataError(e.to_string()))?;
         let metadata: ImageMetadata = serde_json::from_str(metadata_json)
             .map_err(|e| FormatError::MetadataError(e.to_string()))?;
         pos += metadata_len;
         
-        // Read image data
+        // Read image data.
         let data = bytes[pos..bytes.len() - 32].to_vec();
         
         Ok(CustomImage {
