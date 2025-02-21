@@ -1,0 +1,21 @@
+[package]
+name = "nor-image"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = "0.25.5"
+winit = "0.30.9"
+glium = "0.36"
+clap = { version = "4.5.30", features = ["derive"] }
+minifb = "0.25"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+kamadak-exif = "0.5"
+rayon = "1.8"
+memmap2 = "0.9"
+lru = "0.12"
+bytes = "1.5"
+crossbeam-channel = "0.5"
+lazy_static = "1.4"
