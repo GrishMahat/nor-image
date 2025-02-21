@@ -1,4 +1,4 @@
-// Copyright 2023 Grish
+// Copyright 2023` Grish
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Most of the documentation is by AI, I am to lazy to write it myself.
 //! # Nor-Image CLI
 //! 
 //! Command-line interface for the Nor-Image tool, providing functionality for:
