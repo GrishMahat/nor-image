@@ -17,9 +17,11 @@ use crate::format::{CustomImage, ColorType};
 use std::fs;
 use std::error::Error;
 
+// Zoom configuration constants.
 const MIN_ZOOM: f32 = 0.1;
 const MAX_ZOOM: f32 = 10.0;
 const ZOOM_STEP: f32 = 0.1;
+const PANEL_WIDTH: usize = 200;
 
 /// A basic image viewer.
 pub struct ImageViewer {
@@ -35,6 +37,7 @@ pub struct ImageViewer {
     pan_x: f32,                // Pan offset as fraction (0.0 to 1.0)
     pan_y: f32,                // Pan offset as fraction (0.0 to 1.0)
     edge_detection: bool,
+    show_panel: bool,          // Toggle for side panel UI
 }
 
 impl ImageViewer {
@@ -45,6 +48,7 @@ impl ImageViewer {
         let height = custom_image.height as usize;
         
         // Create the window with dimensions equal to the image.
+        // (The window can later be resized by the user.)
         let mut window = Window::new(
             &format!("Image Viewer ({}x{}) - Press H for help", width, height),
             width,
@@ -56,7 +60,7 @@ impl ImageViewer {
             },
         ).map_err(|e| format!("Failed to create window: {}", e))?;
 
-        // Set FPS limit (~60 FPS)
+        // Limit FPS (~60 FPS)
         window.limit_update_rate(Some(std::time::Duration::from_micros(16_600)));
 
         // Convert the custom image's data into a u32 RGB buffer.
@@ -75,6 +79,7 @@ impl ImageViewer {
             pan_x: 0.0,
             pan_y: 0.0,
             edge_detection: false,
+            show_panel: false,
         };
 
         // Apply initial adjustments and render.
@@ -105,15 +110,13 @@ impl ImageViewer {
         buffer
     }
 
-    /// Applies brightness and contrast adjustments to the image.
+    /// Applies brightness and contrast adjustments (or edge detection) to the image.
     fn apply_adjustments(&mut self) {
-        // Start from the original image.
         self.buffer = self.original_buffer.clone();
         if self.edge_detection {
             self.apply_edge_detection();
             return;
         }
-        // Adjust each pixel.
         for pixel in self.buffer.iter_mut() {
             let r = (((*pixel >> 16) & 0xFF) as i32 + self.brightness).clamp(0, 255);
             let g = (((*pixel >> 8) & 0xFF) as i32 + self.brightness).clamp(0, 255);
@@ -167,21 +170,36 @@ impl ImageViewer {
     }
 
     /// Updates the window buffer by scaling, panning, and interpolating.
+    /// Also updates the window title overlay and (if enabled) draws a side panel.
     fn update_window_buffer(&mut self) -> Result<(), Box<dyn Error>> {
         let (win_width, win_height) = self.window.get_size();
+        // Determine panel width if enabled.
+        let panel_width = if self.show_panel { PANEL_WIDTH } else { 0 };
+        // Update window title with overlay information.
+        let overlay = format!(
+            "Zoom: {:.1}x | Brightness: {} | Contrast: {} | Edge: {} | Panel: {}",
+            self.zoom,
+            self.brightness,
+            self.contrast,
+            if self.edge_detection { "On" } else { "Off" },
+            if self.show_panel { "On" } else { "Off" }
+        );
+        self.window.set_title(&format!("Image Viewer - {}", overlay));
+
         let scaled_width = (self.width as f32 * self.zoom) as usize;
         let scaled_height = (self.height as f32 * self.zoom) as usize;
 
         // Calculate maximum pan offsets.
-        let max_pan_x = if scaled_width > win_width { scaled_width as i32 - win_width as i32 } else { 0 };
+        let max_pan_x = if scaled_width > win_width - panel_width { scaled_width as i32 - (win_width - panel_width) as i32 } else { 0 };
         let max_pan_y = if scaled_height > win_height { scaled_height as i32 - win_height as i32 } else { 0 };
-        // Compute pixel offset from pan fractions.
         let offset_x = ((self.pan_x * scaled_width as f32) as i32).clamp(0, max_pan_x);
         let offset_y = ((self.pan_y * scaled_height as f32) as i32).clamp(0, max_pan_y);
 
         let mut new_buffer = vec![0u32; win_width * win_height];
+
+        // Draw the main image (only in the area left of the side panel, if active).
         for win_y in 0..win_height {
-            for win_x in 0..win_width {
+            for win_x in 0..(win_width - panel_width) {
                 let img_x = (win_x as i32 + offset_x) as f32 / self.zoom;
                 let img_y = (win_y as i32 + offset_y) as f32 / self.zoom;
                 if img_x < 0.0 || img_y < 0.0 || img_x >= (self.width - 1) as f32 || img_y >= (self.height - 1) as f32 {
@@ -206,16 +224,91 @@ impl ImageViewer {
                 new_buffer[win_y * win_width + win_x] = (r << 16) | (g << 8) | b;
             }
         }
+
+        // If side panel is enabled, draw it.
+        if self.show_panel {
+            self.draw_side_panel(&mut new_buffer, win_width, win_height);
+        }
+
         self.window.update_with_buffer(&new_buffer, win_width, win_height)
             .map_err(|e| format!("Window buffer update failed: {}", e))?;
         Ok(())
     }
 
-    /// Main loop: handles input (keyboard and mouse) and updates the display.
+    /// Draws a simple side panel with colored status bars for controls.
+    fn draw_side_panel(&self, buffer: &mut Vec<u32>, win_width: usize, win_height: usize) {
+        let start = win_width - PANEL_WIDTH;
+        // Fill panel background.
+        for y in 0..win_height {
+            for x in start..win_width {
+                buffer[y * win_width + x] = 0x303030; // dark gray
+            }
+        }
+        // Draw a zoom bar.
+        let bar_height = 20;
+        let zoom_bar_length = (((self.zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * ((PANEL_WIDTH as f32) - 20.0)) as usize;
+        let zoom_y = 50;
+        for y in zoom_y..(zoom_y + bar_height) {
+            for x in (start + 10)..(start + 10 + zoom_bar_length) {
+                if x < win_width && y < win_height {
+                    buffer[y * win_width + x] = 0x00FF00; // green for zoom
+                }
+            }
+        }
+        // Draw a brightness bar.
+        let brightness_norm = ((self.brightness + 255) as f32 / 510.0) * ((PANEL_WIDTH - 20) as f32);
+        let bright_bar_length = brightness_norm as usize;
+        let bright_y = zoom_y + bar_height + 10;
+        for y in bright_y..(bright_y + bar_height) {
+            for x in (start + 10)..(start + 10 + bright_bar_length) {
+                if x < win_width && y < win_height {
+                    buffer[y * win_width + x] = 0xFFFF00; // yellow for brightness
+                }
+            }
+        }
+        // Draw a contrast bar.
+        let contrast_norm = ((self.contrast + 255) as f32 / 510.0) * ((PANEL_WIDTH - 20) as f32);
+        let contrast_bar_length = contrast_norm as usize;
+        let contrast_y = bright_y + bar_height + 10;
+        for y in contrast_y..(contrast_y + bar_height) {
+            for x in (start + 10)..(start + 10 + contrast_bar_length) {
+                if x < win_width && y < win_height {
+                    buffer[y * win_width + x] = 0x00FFFF; // cyan for contrast
+                }
+            }
+        }
+        // Draw an indicator for edge detection.
+        let edge_color = if self.edge_detection { 0x00FF00 } else { 0xFF0000 };
+        let edge_y = contrast_y + bar_height + 10;
+        for y in edge_y..(edge_y + 20) {
+            for x in (start + 10)..(start + 30) {
+                if x < win_width && y < win_height {
+                    buffer[y * win_width + x] = edge_color;
+                }
+            }
+        }
+    }
+
+    /// Saves the current view as a PNG screenshot using the image crate.
+    fn save_screenshot(&self) -> Result<(), Box<dyn Error>> {
+        // Save the original adjusted buffer (at image resolution).
+        let mut imgbuf = image::RgbImage::new(self.width as u32, self.height as u32);
+        for (i, pixel) in self.buffer.iter().enumerate() {
+            let r = ((pixel >> 16) & 0xFF) as u8;
+            let g = ((pixel >> 8) & 0xFF) as u8;
+            let b = (pixel & 0xFF) as u8;
+            let x = (i % self.width) as u32;
+            let y = (i / self.width) as u32;
+            imgbuf.put_pixel(x, y, image::Rgb([r, g, b]));
+        }
+        imgbuf.save("screenshot.png")?;
+        Ok(())
+    }
+
+    /// Main loop: handles input (keyboard, mouse, and mouse wheel) and updates the display.
     pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
         self.show_help();
         let mut last_win_size = self.window.get_size();
-        // Variables for mouse dragging.
         let mut last_mouse_pos: Option<(f32, f32)> = None;
 
         while self.window.is_open() && !self.window.is_key_down(Key::Escape) {
@@ -242,7 +335,23 @@ impl ImageViewer {
                     Key::Down => { self.brightness = (self.brightness - 5).max(-255); needs_update = true; }
                     Key::Right => { self.contrast = (self.contrast + 5).min(255); needs_update = true; }
                     Key::Left => { self.contrast = (self.contrast - 5).max(-255); needs_update = true; }
+                    Key::S => {
+                        if let Err(e) = self.save_screenshot() {
+                            eprintln!("Failed to save screenshot: {}", e);
+                        } else {
+                            println!("Screenshot saved as screenshot.png");
+                        }
+                    }
+                    Key::P => { self.show_panel = !self.show_panel; needs_update = true; }
                     _ => {}
+                }
+            }
+
+            // Add mouse wheel support for zooming (if available).
+            if let Some((_, scroll_y)) = self.window.get_scroll_wheel() {
+                if scroll_y != 0.0 {
+                    self.zoom = (self.zoom + scroll_y * ZOOM_STEP).clamp(MIN_ZOOM, MAX_ZOOM);
+                    needs_update = true;
                 }
             }
 
@@ -252,7 +361,6 @@ impl ImageViewer {
                     if let Some((last_x, last_y)) = last_mouse_pos {
                         let dx = cur_x - last_x;
                         let dy = cur_y - last_y;
-                        // Update pan offsets as fractions.
                         self.pan_x = (self.pan_x + dx / (self.width as f32 * self.zoom)).clamp(0.0, 1.0);
                         self.pan_y = (self.pan_y + dy / (self.height as f32 * self.zoom)).clamp(0.0, 1.0);
                         needs_update = true;
@@ -284,18 +392,20 @@ impl ImageViewer {
     fn show_help(&self) {
         println!("\nImage Viewer Controls:");
         println!("----------------------");
-        println!("ESC - Exit");
-        println!("H   - Show help");
-        println!("+ / - - Zoom in/out (use mouse scroll if supported)");
-        println!("↑ / ↓ - Adjust brightness");
-        println!("← / → - Adjust contrast");
-        println!("E   - Toggle edge detection");
-        println!("R   - Reset adjustments");
-        println!("I   - Show image info");
+        println!("ESC           - Exit");
+        println!("H             - Show help");
+        println!("I             - Show image info");
+        println!("E             - Toggle edge detection");
+        println!("R             - Reset adjustments");
+        println!("+ / -        - Zoom in/out (or use mouse wheel)");
+        println!("↑ / ↓        - Adjust brightness");
+        println!("← / →        - Adjust contrast");
+        println!("S             - Save screenshot (screenshot.png)");
+        println!("P             - Toggle side panel");
         println!("Drag with left mouse button to pan");
     }
 
-    /// Displays image information.
+    /// Displays image information in the console.
     fn show_info(&self) {
         println!("\nImage Information:");
         println!("------------------");
@@ -305,6 +415,7 @@ impl ImageViewer {
         println!("Brightness: {}", self.brightness);
         println!("Contrast: {}", self.contrast);
         println!("Edge Detection: {}", if self.edge_detection { "On" } else { "Off" });
+        println!("Side Panel: {}", if self.show_panel { "On" } else { "Off" });
         let (win_w, win_h) = self.window.get_size();
         println!("Window size: {}x{}", win_w, win_h);
     }

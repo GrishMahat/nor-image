@@ -123,7 +123,6 @@ pub enum FormatError {
     /// Error serializing/deserializing metadata.
     MetadataError(String),
 }
-
 impl fmt::Display for FormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -560,7 +559,7 @@ impl CustomImage {
         // Calculate and append checksum.
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
-        let checksum = hasher.finalize();
+        let checksum: sha2::digest::generic_array::GenericArray<u8, sha2::digest::typenum::UInt<sha2::digest::typenum::UInt<sha2::digest::typenum::UInt<sha2::digest::typenum::UInt<sha2::digest::typenum::UInt<sha2::digest::typenum::UInt<sha2::digest::typenum::UTerm, sha2::digest::consts::B1>, sha2::digest::consts::B0>, sha2::digest::consts::B0>, sha2::digest::consts::B0>, sha2::digest::consts::B0>, sha2::digest::consts::B0>> = hasher.finalize();
         bytes.extend_from_slice(&checksum);
         
         Ok(bytes)

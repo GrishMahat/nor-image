@@ -12,33 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Most of the documentation is by AI, I am too lazy to write it myself.
 //! # Nor-Image CLI
 //!
 //! A high-performance image processing and conversion tool with an intuitive command-line interface.
 //!
-//! ## Key Features
+//! **Key Features:**
 //!
-//! - Convert between PNG and .nor formats with optional processing
+//! - Convert between PNG and the custom `.nor` format with optional processing
 //! - Interactive image viewing with real-time adjustments
 //! - Comprehensive metadata management
-//! - Performance optimizations through caching, streaming, and parallel processing
+//! - Performance optimizations via caching, streaming, and parallel processing
 //!
-//! ## Basic Usage
+//! **Usage Examples:**
 //!
-//! ```bash
-//! nor-image png-to-custom input.png output.nor    # Convert PNG to custom format
-//! nor-image custom-to-png input.nor output.png      # Convert custom format to PNG
-//! nor-image view image.nor                          # View a .nor image
-//! nor-image info image.nor                          # Display image metadata
-//! nor-image clear-cache                             # Clear image cache
-//! ```
+//!   • `nor-image png-to-custom input.png output.nor`
 //!
-//! For more details, run `nor-image --help`.
+//!   • `nor-image custom-to-png input.nor output.png`
+//!
+//!   • `nor-image view image.nor`
+//!
+//!   • `nor-image info image.nor`
+//!
+//!   • `nor-image clear-cache`
+//!
+//! *Tip: Launching `nor-image` without any arguments will start interactive mode.*
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::error::Error;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use crate::converter::{png_to_custom, custom_to_png, ConversionConfig};
@@ -47,8 +49,13 @@ use crate::viewer::view_custom_image;
 
 mod converter;
 mod format;
-mod viewer;
 mod processing;
+mod viewer;
+
+use colored::*;
+use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
+use env_logger::Builder;
+use log::{Level, LevelFilter, Record};
 
 /// Supported compression types for the custom image format.
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -75,20 +82,28 @@ impl From<CompressType> for CompressionType {
 }
 
 /// Nor-Image: High-performance image processing and conversion tool.
+///
+/// If no subcommand is provided, interactive mode will launch.
 #[derive(Parser)]
-#[command(name = "nor-image")]
-#[command(author = "Grish <grish@nory.tech>")]
-#[command(version = "1.0")]
-#[command(about = "A powerful image processing tool for converting and manipulating images", long_about = None)]
+#[command(
+    name = "nor-image",
+    author = "Grish <grish@nory.tech>",
+    version = "1.0",
+    about = "A powerful tool for converting and manipulating images",
+    long_about = "Nor-Image CLI\n\
+                  \nA high-performance image processing and conversion tool.\n\
+                  \nIf no subcommand is provided, interactive mode is launched by default.\n\
+                  \nUsage Examples:\n  • nor-image png-to-custom input.png output.nor\n  • nor-image custom-to-png input.nor output.png\n  • nor-image view image.nor\n  • nor-image info image.nor\n  • nor-image clear-cache"
+)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 /// Available commands.
 #[derive(Subcommand)]
 enum Commands {
-    /// Convert a PNG file to the custom .nor format.
+    /// Convert a PNG file to the custom `.nor` format.
     #[command(name = "png-to-custom", visible_alias = "p2n")]
     PngToCustom {
         /// Input PNG file path (must have .png extension).
@@ -125,7 +140,7 @@ enum Commands {
         #[arg(long, default_value = "1", value_name = "MB", help = "Chunk size for parallel processing (MB)")]
         chunk_size: usize,
     },
-    /// Convert a .nor file back to PNG format.
+    /// Convert a `.nor` file back to PNG format.
     #[command(name = "custom-to-png", visible_alias = "n2p")]
     CustomToPng {
         /// Input .nor file path (must have .nor extension).
@@ -153,7 +168,7 @@ enum Commands {
         #[arg(long, default_value = "1", value_name = "MB", help = "Chunk size for parallel processing (MB)")]
         chunk_size: usize,
     },
-    /// View a .nor image interactively.
+    /// View a `.nor` image.
     #[command(name = "view", visible_alias = "v")]
     View {
         /// Input .nor file path.
@@ -163,7 +178,7 @@ enum Commands {
         #[arg(long, help = "Use cached version for faster loading")]
         use_cache: bool,
     },
-    /// Display metadata of a .nor image.
+    /// Display metadata of a `.nor` image.
     #[command(name = "info", visible_alias = "i")]
     Info {
         /// Input .nor file path.
@@ -173,9 +188,12 @@ enum Commands {
     /// Clear the image cache.
     #[command(name = "clear-cache", visible_alias = "cc")]
     ClearCache,
+    /// (Optional) Run interactive mode.
+    #[command(name = "interactive", visible_alias = "i-mode")]
+    Interactive,
 }
 
-/// Validates that the provided path has a .nor extension.
+/// Validates that the provided path has a `.nor` extension.
 fn validate_nor_extension(path: &str) -> Result<(), String> {
     let ext = Path::new(path)
         .extension()
@@ -188,7 +206,7 @@ fn validate_nor_extension(path: &str) -> Result<(), String> {
     }
 }
 
-/// Validates that the provided path has a .png extension.
+/// Validates that the provided path has a `.png` extension.
 fn validate_png_extension(path: &str) -> Result<(), String> {
     let ext = Path::new(path)
         .extension()
@@ -203,54 +221,329 @@ fn validate_png_extension(path: &str) -> Result<(), String> {
 
 /// Displays metadata of a custom image in a formatted way.
 fn display_metadata(image: &CustomImage) {
-    println!("\nImage Information:");
-    println!("------------------");
-    println!("Dimensions: {}x{}", image.width, image.height);
-    println!("Color Type: {:?}", image.color_type);
-    println!("Compression: {:?}", image.compression);
-    println!("\nMetadata:");
-    println!("Creation Date: {}", image.metadata.creation_date);
+    println!("\n{}", "Image Information:".bright_cyan().bold());
+    println!("{}", "-------------------".bright_cyan());
+    println!("{}: {}x{}", "Dimensions".bright_yellow(), image.width, image.height);
+    println!("{}: {:?}", "Color Type".bright_yellow(), image.color_type);
+    println!("{}: {:?}", "Compression".bright_yellow(), image.compression);
+    
+    println!("\n{}", "Metadata:".bright_cyan().bold());
+    println!("{}: {}", "Creation Date".bright_yellow(), image.metadata.creation_date);
     
     if let Some(ref author) = image.metadata.author {
-        println!("Author: {}", author);
+        println!("{}: {}", "Author".bright_yellow(), author);
     }
     
     if let Some(ref camera) = image.metadata.camera_model {
-        println!("Camera Model: {}", camera);
+        println!("{}: {}", "Camera Model".bright_yellow(), camera);
     }
     
     if let Some(exposure) = image.metadata.exposure_time {
-        println!("Exposure Time: {}s", exposure);
+        println!("{}: {}s", "Exposure Time".bright_yellow(), exposure);
     }
     
     if let Some(iso) = image.metadata.iso {
-        println!("ISO: {}", iso);
+        println!("{}: {}", "ISO".bright_yellow(), iso);
     }
     
     if let Some(f_number) = image.metadata.f_number {
-        println!("F-Number: f/{:.1}", f_number);
+        println!("{}: f/{:.1}", "F-Number".bright_yellow(), f_number);
     }
     
     if let Some(focal_length) = image.metadata.focal_length {
-        println!("Focal Length: {}mm", focal_length);
+        println!("{}: {}mm", "Focal Length".bright_yellow(), focal_length);
     }
     
     if !image.metadata.custom_fields.is_empty() {
-        println!("\nCustom Fields:");
+        println!("\n{}", "Custom Fields:".bright_cyan().bold());
         for (key, value) in &image.metadata.custom_fields {
-            println!("{}: {}", key, value);
+            println!("{}: {}", key.bright_yellow(), value);
         }
     }
 }
 
+/// Runs the interactive mode using dialoguer prompts.
+fn interactive_mode() -> Result<(), Box<dyn Error>> {
+    let theme = ColorfulTheme::default();
+    
+    loop {
+        println!("\n{}", "🖼  Nor-Image Interactive Mode".bright_cyan().bold());
+        println!("{}\n", "=========================".bright_cyan());
+        
+        let choices = &[
+            "🔄 Convert PNG to custom (.nor)",
+            "🔄 Convert custom (.nor) to PNG",
+            "👁  View a .nor image",
+            "ℹ️  Display image metadata",
+            "🗑  Clear cache",
+            "❌ Exit",
+        ];
+        
+        let selection = Select::with_theme(&theme)
+            .with_prompt("Choose an action")
+            .default(0)
+            .items(choices)
+            .interact()?;
+
+        match selection {
+            0 => {
+                println!("\n{}", "PNG to NOR Conversion".bright_green().bold());
+                let input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter input PNG file path")
+                    .interact_text()?;
+                if let Err(e) = validate_png_extension(&input) {
+                    eprintln!("{}: {}", "Error".bright_red().bold(), e);
+                    continue;
+                }
+                let output: String = Input::with_theme(&theme)
+                    .with_prompt("Enter output .nor file path")
+                    .interact_text()?;
+                if let Err(e) = validate_nor_extension(&output) {
+                    eprintln!("{}: {}", "Error".bright_red().bold(), e);
+                    continue;
+                }
+                let grayscale: bool = Confirm::with_theme(&theme)
+                    .with_prompt("Convert to grayscale?")
+                    .default(false)
+                    .interact()?;
+                let compression_options = &["None", "RLE", "Delta", "Lossy"];
+                let comp_index = Select::with_theme(&theme)
+                    .with_prompt("Select compression method")
+                    .default(0)
+                    .items(compression_options)
+                    .interact()?;
+                let compression = match comp_index {
+                    0 => CompressType::None,
+                    1 => CompressType::Rle,
+                    2 => CompressType::Delta,
+                    3 => CompressType::Lossy,
+                    _ => CompressType::None,
+                };
+                let width_input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter target width (leave blank for unchanged)")
+                    .allow_empty(true)
+                    .interact_text()?;
+                let width = if width_input.trim().is_empty() {
+                    None
+                } else {
+                    match width_input.trim().parse::<u32>() {
+                        Ok(num) => Some(num),
+                        Err(_) => {
+                            eprintln!("{}: Invalid width", "Error".bright_red().bold());
+                            continue;
+                        }
+                    }
+                };
+                let height_input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter target height (leave blank for unchanged)")
+                    .allow_empty(true)
+                    .interact_text()?;
+                let height = if height_input.trim().is_empty() {
+                    None
+                } else {
+                    match height_input.trim().parse::<u32>() {
+                        Ok(num) => Some(num),
+                        Err(_) => {
+                            eprintln!("{}: Invalid height", "Error".bright_red().bold());
+                            continue;
+                        }
+                    }
+                };
+                let brightness: i32 = Input::with_theme(&theme)
+                    .with_prompt("Enter brightness adjustment (-255 to 255)")
+                    .default(0)
+                    .interact_text()?;
+                let contrast: i32 = Input::with_theme(&theme)
+                    .with_prompt("Enter contrast adjustment (-255 to 255)")
+                    .default(0)
+                    .interact_text()?;
+                let no_cache: bool = Confirm::with_theme(&theme)
+                    .with_prompt("Disable caching?")
+                    .default(false)
+                    .interact()?;
+
+                let config = ConversionConfig {
+                    resize_width: width,
+                    resize_height: height,
+                    brightness,
+                    contrast,
+                    force_grayscale: grayscale,
+                    compression: compression.into(),
+                    use_cache: !no_cache,
+                };
+
+                println!("\n{} {} to {}...", "Converting".bright_yellow(), input, output);
+                match png_to_custom(&input, Some(&output), Some(config)) {
+                    Ok(_) => println!("{} Successfully converted {} to {}", "✓".bright_green(), input, output),
+                    Err(e) => eprintln!("{} {}", "Error:".bright_red().bold(), e),
+                }
+            }
+            1 => {
+                println!("\n{}", "NOR to PNG Conversion".bright_green().bold());
+                let input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter input .nor file path")
+                    .interact_text()?;
+                if let Err(e) = validate_nor_extension(&input) {
+                    eprintln!("{}: {}", "Error".bright_red().bold(), e);
+                    continue;
+                }
+                let output: String = Input::with_theme(&theme)
+                    .with_prompt("Enter output PNG file path")
+                    .interact_text()?;
+                if let Err(e) = validate_png_extension(&output) {
+                    eprintln!("{}: {}", "Error".bright_red().bold(), e);
+                    continue;
+                }
+                let width_input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter target width (leave blank for unchanged)")
+                    .allow_empty(true)
+                    .interact_text()?;
+                let width = if width_input.trim().is_empty() {
+                    None
+                } else {
+                    match width_input.trim().parse::<u32>() {
+                        Ok(num) => Some(num),
+                        Err(_) => {
+                            eprintln!("{}: Invalid width", "Error".bright_red().bold());
+                            continue;
+                        }
+                    }
+                };
+                let height_input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter target height (leave blank for unchanged)")
+                    .allow_empty(true)
+                    .interact_text()?;
+                let height = if height_input.trim().is_empty() {
+                    None
+                } else {
+                    match height_input.trim().parse::<u32>() {
+                        Ok(num) => Some(num),
+                        Err(_) => {
+                            eprintln!("{}: Invalid height", "Error".bright_red().bold());
+                            continue;
+                        }
+                    }
+                };
+                let brightness: i32 = Input::with_theme(&theme)
+                    .with_prompt("Enter brightness adjustment (-255 to 255)")
+                    .default(0)
+                    .interact_text()?;
+                let contrast: i32 = Input::with_theme(&theme)
+                    .with_prompt("Enter contrast adjustment (-255 to 255)")
+                    .default(0)
+                    .interact_text()?;
+
+                match fs::read(&input) {
+                    Ok(bytes) => {
+                        match CustomImage::from_bytes(&bytes) {
+                            Ok(custom_img) => {
+                                let config = ConversionConfig {
+                                    resize_width: width,
+                                    resize_height: height,
+                                    brightness,
+                                    contrast,
+                                    force_grayscale: false,
+                                    compression: CompressionType::None,
+                                    use_cache: false,
+                                };
+                                println!("\n{} {} to {}...", "Converting".bright_yellow(), input, output);
+                                match custom_to_png(&custom_img, &output, Some(config)) {
+                                    Ok(_) => println!("{} Successfully converted {} to {}", "✓".bright_green(), input, output),
+                                    Err(e) => eprintln!("{} {}", "Error:".bright_red().bold(), e),
+                                }
+                            }
+                            Err(e) => eprintln!("{} Reading custom image: {}", "Error:".bright_red().bold(), e),
+                        }
+                    }
+                    Err(e) => eprintln!("{} Reading file: {}", "Error:".bright_red().bold(), e),
+                }
+            }
+            2 => {
+                println!("\n{}", "Image Viewer".bright_green().bold());
+                let input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter .nor image file path")
+                    .interact_text()?;
+                if let Err(e) = validate_nor_extension(&input) {
+                    eprintln!("{}: {}", "Error".bright_red().bold(), e);
+                    continue;
+                }
+                let _use_cache: bool = Confirm::with_theme(&theme)
+                    .with_prompt("Use cached version?")
+                    .default(false)
+                    .interact()?;
+                match view_custom_image(&input) {
+                    Ok(_) => println!("{} Opened viewer for {}", "✓".bright_green(), input),
+                    Err(e) => eprintln!("{} {}", "Error:".bright_red().bold(), e),
+                }
+            }
+            3 => {
+                println!("\n{}", "Image Metadata".bright_green().bold());
+                let input: String = Input::with_theme(&theme)
+                    .with_prompt("Enter .nor image file path")
+                    .interact_text()?;
+                if let Err(e) = validate_nor_extension(&input) {
+                    eprintln!("{}: {}", "Error".bright_red().bold(), e);
+                    continue;
+                }
+                match fs::read(&input) {
+                    Ok(bytes) => {
+                        match CustomImage::from_bytes(&bytes) {
+                            Ok(custom_img) => display_metadata(&custom_img),
+                            Err(e) => eprintln!("{} Reading custom image: {}", "Error:".bright_red().bold(), e),
+                        }
+                    }
+                    Err(e) => eprintln!("{} Reading file: {}", "Error:".bright_red().bold(), e),
+                }
+            }
+            4 => {
+                println!("\n{}", "Clear Cache".bright_green().bold());
+                let confirm = Confirm::with_theme(&theme)
+                    .with_prompt("Are you sure you want to clear the image cache?")
+                    .default(false)
+                    .interact()?;
+                if confirm {
+                    use crate::processing::IMAGE_CACHE;
+                    if let Ok(mut cache) = IMAGE_CACHE.lock() {
+                        cache.clear();
+                        println!("{} Image cache cleared successfully", "✓".bright_green());
+                    } else {
+                        eprintln!("{} Failed to clear cache: could not acquire lock", "Error:".bright_red().bold());
+                    }
+                }
+            }
+            5 => {
+                println!("\n{} Goodbye!", "👋".bright_cyan());
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Main entry point.
 fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize logging.
-    env_logger::init();
+    // Initialize custom logging with full colored output.
+    Builder::new()
+        .filter_level(LevelFilter::Info)
+        .format(|buf, record: &Record| {
+            let ts = buf.timestamp();
+            let level = record.level();
+            let level_str = match level {
+                Level::Error => level.to_string().bright_red().bold(),
+                Level::Warn => level.to_string().bright_yellow().bold(),
+                Level::Info => level.to_string().bright_green().bold(),
+                Level::Debug => level.to_string().bright_blue().bold(),
+                Level::Trace => level.to_string().bright_magenta().bold(),
+            };
+            writeln!(buf, "{} [{}] {}", ts.to_string(), level_str, record.args())
+        })
+        .init();
+
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::PngToCustom {
+        Some(Commands::PngToCustom {
             input,
             output,
             grayscale,
@@ -262,8 +555,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             no_cache,
             no_streaming: _,
             chunk_size: _,
-        } => {
-            // Validate file extensions.
+        }) => {
             validate_png_extension(&input)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
             validate_nor_extension(&output)
@@ -279,29 +571,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                 use_cache: !no_cache,
             };
             
-            println!("Converting {} to {} with settings:", input, output);
-            println!("  - Grayscale: {}", if grayscale { "yes" } else { "no" });
-            println!("  - Compression: {:?}", compression);
+            println!("\n{}", "Conversion Settings:".bright_cyan().bold());
+            println!("  {} {}", "Input:".bright_yellow(), input);
+            println!("  {} {}", "Output:".bright_yellow(), output);
+            println!("  {} {}", "Grayscale:".bright_yellow(), if grayscale { "yes" } else { "no" });
+            println!("  {} {:?}", "Compression:".bright_yellow(), compression);
             if width.is_some() || height.is_some() {
-                println!("  - Resize: {}x{}", 
+                println!(
+                    "  {} {}x{}", 
+                    "Resize:".bright_yellow(),
                     width.map_or("unchanged".to_string(), |w| w.to_string()),
-                    height.map_or("unchanged".to_string(), |h| h.to_string()));
+                    height.map_or("unchanged".to_string(), |h| h.to_string())
+                );
             }
             if brightness != 0 || contrast != 0 {
-                println!("  - Adjustments: brightness={}, contrast={}", brightness, contrast);
+                println!("  {} brightness={}, contrast={}", "Adjustments:".bright_yellow(), brightness, contrast);
             }
-            println!("  - Caching: {}", if !no_cache { "enabled" } else { "disabled" });
+            println!("  {} {}", "Caching:".bright_yellow(), if !no_cache { "enabled" } else { "disabled" });
             
+            println!("\n{} Converting...", "⚙️".bright_yellow());
             match png_to_custom(&input, Some(&output), Some(config)) {
-                Ok(_) => println!("✓ Successfully converted {} to {}", input, output),
+                Ok(_) => println!("{} Successfully converted {} to {}", "✓".bright_green(), input, output),
                 Err(e) => {
-                    eprintln!("Error during conversion:");
-                    eprintln!("  {}", e);
+                    eprintln!("{} {}", "Error:".bright_red().bold(), e);
                     return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)));
                 }
             }
         }
-        Commands::CustomToPng {
+        Some(Commands::CustomToPng {
             input,
             output,
             width,
@@ -310,7 +607,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             contrast,
             no_streaming: _,
             chunk_size: _,
-        } => {
+        }) => {
             validate_nor_extension(&input)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
             validate_png_extension(&output)
@@ -329,45 +626,54 @@ fn main() -> Result<(), Box<dyn Error>> {
                 use_cache: false,
             };
             
-            println!("Converting {} to {} with settings:", input, output);
+            println!("\n{}", "Conversion Settings:".bright_cyan().bold());
+            println!("  {} {}", "Input:".bright_yellow(), input);
+            println!("  {} {}", "Output:".bright_yellow(), output);
             if width.is_some() || height.is_some() {
-                println!("  - Resize: {}x{}", 
+                println!(
+                    "  {} {}x{}", 
+                    "Resize:".bright_yellow(),
                     width.map_or("unchanged".to_string(), |w| w.to_string()),
-                    height.map_or("unchanged".to_string(), |h| h.to_string()));
+                    height.map_or("unchanged".to_string(), |h| h.to_string())
+                );
             }
             if brightness != 0 || contrast != 0 {
-                println!("  - Adjustments: brightness={}, contrast={}", brightness, contrast);
+                println!("  {} brightness={}, contrast={}", "Adjustments:".bright_yellow(), brightness, contrast);
             }
             
+            println!("\n{} Converting...", "⚙️".bright_yellow());
             match custom_to_png(&custom_img, &output, Some(config)) {
-                Ok(_) => println!("✓ Successfully converted {} to {}", input, output),
+                Ok(_) => println!("{} Successfully converted {} to {}", "✓".bright_green(), input, output),
                 Err(e) => {
-                    eprintln!("Error during conversion:");
-                    eprintln!("  {}", e);
+                    eprintln!("{} {}", "Error:".bright_red().bold(), e);
                     return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)));
                 }
             }
         }
-        Commands::View { input, use_cache: _ } => {
+        Some(Commands::View { input, use_cache: _ }) => {
             validate_nor_extension(&input)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+            println!("\n{} Opening viewer...", "👁".bright_yellow());
             view_custom_image(&input)?;
         }
-        Commands::Info { input } => {
+        Some(Commands::Info { input }) => {
             validate_nor_extension(&input)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
             let bytes = fs::read(&input)?;
             let custom_img = CustomImage::from_bytes(&bytes)?;
             display_metadata(&custom_img);
         }
-        Commands::ClearCache => {
+        Some(Commands::ClearCache) => {
             use crate::processing::IMAGE_CACHE;
             if let Ok(mut cache) = IMAGE_CACHE.lock() {
                 cache.clear();
-                println!("Image cache cleared successfully");
+                println!("{} Image cache cleared successfully", "✓".bright_green());
             } else {
-                eprintln!("Failed to clear cache: could not acquire lock");
+                eprintln!("{} Failed to clear cache: could not acquire lock", "Error:".bright_red().bold());
             }
+        }
+        _ => {
+            interactive_mode()?;
         }
     }
     Ok(())
